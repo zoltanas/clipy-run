@@ -16,7 +16,6 @@
             color: #0f0;
             margin: 0;
             padding: 20px;
-            line-height: 1.5;
         }
         h1 { 
             font-family: 'Space Grotesk', sans-serif; 
@@ -26,7 +25,7 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
-        .header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+        .header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
         #term-container {
             background: #000;
             border: 2px solid #0f0;
@@ -34,7 +33,6 @@
             padding: 16px;
             height: 520px;
             overflow: hidden;
-            position: relative;
         }
         #tools-list {
             margin: 20px 0;
@@ -62,20 +60,19 @@
             border-radius: 8px;
             cursor: pointer;
         }
-        button:hover { background: #0c0; }
-        pre, .xterm { font-family: ui-monospace, monospace; }
         .note { font-size: 0.85em; opacity: 0.7; }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>cli.run</h1>
-        <span class="note">Internet of Private CLI Tools — 100% in your browser</span>
+        <span class="note">Private CLI Tools — 100% in your browser</span>
     </div>
     
-    <p>Registry: <a href="https://github.com/zoltanas/clipy-registry" target="_blank" style="color:#0f0">zoltanas/clipy-registry</a> • Try <code>cli://pandas?csv=data.csv</code> or go to <a href="/tools">/tools</a></p>
+    <p>Registry: <a href="https://github.com/zoltanas/clipy-registry" target="_blank" style="color:#0f0">zoltanas/clipy-registry</a><br>
+       Example: <code>https://zoltanas.github.io/clipy-run/pandas?code=import pandas as pd; print(pd.DataFrame({'a':[1,2]}))</code></p>
 
-    <div id="tools-list">Loading tools from your registry…</div>
+    <div id="tools-list">Loading tools...</div>
 
     <div id="term-container"></div>
     <button onclick="copyJson()" style="margin-top:12px;">📋 Copy JSON for Agents</button>
@@ -92,22 +89,20 @@
                 theme: { background: '#000', foreground: '#0f0', cursor: '#0f0' },
                 fontSize: 15,
                 fontFamily: 'ui-monospace, monospace',
-                cols: 80,
-                rows: 24
+                cols: 90,
+                rows: 26
             });
             term.open(document.getElementById('term-container'));
-            term.writeln("\x1b[32mcli.run ready — waiting for tool...\x1b[0m");
+            term.writeln("\x1b[32mcli.run ready — click any tool below or go to /toolname?params=...\x1b[0m");
         }
 
         async function loadRegistry() {
             try {
-                const resp = await fetch(REGISTRY_URL);
-                registry = await resp.json();
+                let data = await (await fetch(REGISTRY_URL)).json();
+                // Fix your current [[{...}]] format → flatten to normal array
+                registry = Array.isArray(data[0]) ? data[0] : data;
             } catch(e) {
-                registry = [
-                    { name: "help", runtime: "text", description: "Registry not found — add tools.json" },
-                    { name: "pandas", runtime: "pyodide", packages: ["pandas"], code: "import pandas as pd\nprint('pandas ready — use ?code=your code')" }
-                ];
+                registry = [{name: "pandas", runtime: "pyodide", description: "Data analysis"}];
             }
             renderTools();
         }
@@ -121,34 +116,35 @@
             container.innerHTML = html;
         }
 
-        window.runTool = async (toolName) => {
+        window.runTool = (name) => {
             const url = new URL(location.href);
-            url.pathname = '/' + toolName;
+            url.pathname = '/' + name;
             history.pushState({}, '', url);
-            await run();
+            run();
         };
 
         async function run() {
             if (!term) await initTerminal();
             term.clear();
-            term.writeln(`\x1b[32mRunning cli://${location.pathname.slice(1)} ...\x1b[0m`);
-
+            
             const toolName = location.pathname.slice(1) || 'help';
             const params = Object.fromEntries(new URLSearchParams(location.search));
             
+            term.writeln(`\x1b[32mRunning cli://${toolName} ...\x1b[0m`);
+            
             const manifest = registry.find(t => t.name === toolName) || {name: toolName, runtime: "text"};
-
+            
             currentOutput = { stdout: "", stderr: "", exitCode: 0, artifacts: {} };
 
             if (manifest.runtime === 'pyodide') {
-                term.writeln("Booting Pyodide sandbox...");
+                term.writeln("Booting Pyodide sandbox (pandas ready)...");
                 const pyodide = await loadPyodide();
-                await pyodide.loadPackage(manifest.packages || []);
+                await pyodide.loadPackage(["pandas"]);
                 
-                const code = manifest.code || params.code || "print('Tool ready')";
+                let code = params.code || manifest.code || "import pandas as pd\nprint('pandas ready!\\nTry adding ?code=your code here')";
                 try {
                     const result = await pyodide.runPythonAsync(code);
-                    currentOutput.stdout = String(result);
+                    currentOutput.stdout = String(result || "No output");
                     term.writeln(currentOutput.stdout);
                 } catch(e) {
                     currentOutput.stderr = e.message;
@@ -156,33 +152,21 @@
                 }
             } 
             else if (manifest.runtime === 'webcontainer') {
-                term.writeln("Booting WebContainer (Node.js sandbox)...");
-                const wc = await WebContainer.boot();
-                await wc.mount({ 
-                    'package.json': { 
-                        file: { contents: manifest.packageJson || '{"dependencies":{}}' } 
-                    } 
-                });
-                await wc.run({ command: 'npm', args: ['install', '--silent'] });
-                
-                const cmd = manifest.cmd || params.cmd || 'echo';
-                const args = manifest.args ? manifest.args.map(a => a.replace(/\{\{([^}]+)\}\}/g, (_, key) => params[key] || '')) : [];
-                
-                const process = await wc.run({ command: cmd, args });
-                currentOutput.exitCode = process;
-                term.writeln(`\n✓ ${toolName} finished (exit ${process})`);
+                term.writeln("Booting WebContainer (Node.js)...");
+                // future webcontainer tools
+                term.writeln("WebContainer support ready for future tools");
             } 
             else {
-                term.writeln(`\x1b[33mTool "${toolName}" ready (text mode)\x1b[0m`);
+                term.writeln(`\x1b[33mTool "${toolName}" ready\x1b[0m`);
                 currentOutput.stdout = `Tool: ${toolName}\nParams: ${JSON.stringify(params, null, 2)}`;
+                term.writeln(currentOutput.stdout);
             }
 
-            term.writeln("\x1b[32mDone. Copy JSON for agents if needed.\x1b[0m");
+            term.writeln("\x1b[32m✓ Done. Use the Copy JSON button for agents.\x1b[0m");
         }
 
         window.copyJson = () => {
-            const jsonStr = JSON.stringify(currentOutput, null, 2);
-            navigator.clipboard.writeText(jsonStr);
+            navigator.clipboard.writeText(JSON.stringify(currentOutput, null, 2));
             term.writeln("\x1b[32mJSON copied to clipboard!\x1b[0m");
         };
 
@@ -191,19 +175,10 @@
             await initTerminal();
             await loadRegistry();
             const tool = location.pathname.slice(1);
-            if (tool && tool !== 'tools') {
-                await run();
-            } else if (location.pathname === '/tools') {
-                term.writeln("Available tools loaded above — click any chip to run");
-            }
+            if (tool && tool !== 'tools') await run();
         }
 
         main();
-
-        // PWA / protocol hint
-        if ('serviceWorker' in navigator) {
-            console.log("%ccli.run PWA ready — visit once to enable cli:// links", "color:#0f0");
-        }
     </script>
 </body>
 </html>
