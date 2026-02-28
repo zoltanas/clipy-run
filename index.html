@@ -3,10 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>clipy.run — DSPy + Private CLIs</title>
+    <title>cli.run — Internet of CLI Tools</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.29.3/full/pyodide.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@webcontainer/api@1.1.0/dist/index.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm/css/xterm.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Grotesk:wght@500;600&display=swap');
         body {
             font-family: 'Inter', system-ui, sans-serif;
             background: #0a0a0a;
@@ -15,46 +18,23 @@
             padding: 20px;
             line-height: 1.5;
         }
-        h1 { margin: 0 0 8px 0; font-size: 2.2em; }
-        p { margin: 0 0 20px 0; opacity: 0.8; }
-        #settings {
-            position: fixed;
-            top: 16px;
-            right: 16px;
-            background: #111;
-            padding: 10px 14px;
-            border-radius: 50%;
-            cursor: pointer;
-            font-size: 1.4em;
-            border: 2px solid #0f0;
-            z-index: 100;
+        h1 { 
+            font-family: 'Space Grotesk', sans-serif; 
+            font-size: 2.8em; 
+            margin: 0 0 8px 0; 
+            background: linear-gradient(90deg, #0f0, #0a0);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
-        input, button, select {
-            background: #111;
-            color: #0f0;
-            border: 1px solid #0f0;
-            padding: 12px;
-            font-size: 16px;
-            border-radius: 8px;
-            margin: 6px 0;
-        }
-        input { width: 100%; box-sizing: border-box; }
-        button {
-            background: #0f0;
-            color: #000;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        button:hover { background: #0c0; }
-        pre {
+        .header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+        #term-container {
             background: #000;
-            padding: 20px;
+            border: 2px solid #0f0;
             border-radius: 12px;
-            overflow: auto;
-            white-space: pre-wrap;
-            font-family: ui-monospace, monospace;
-            margin-top: 20px;
-            min-height: 120px;
+            padding: 16px;
+            height: 520px;
+            overflow: hidden;
+            position: relative;
         }
         #tools-list {
             margin: 20px 0;
@@ -66,213 +46,164 @@
         .tool-chip {
             display: inline-block;
             background: #222;
-            padding: 4px 10px;
-            margin: 3px 4px;
+            padding: 6px 12px;
+            margin: 4px;
             border-radius: 999px;
             font-size: 0.85em;
             border: 1px solid #0f0;
+            cursor: pointer;
         }
-        #modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            background: rgba(0,0,0,0.95);
-            align-items: center;
-            justify-content: center;
-            z-index: 200;
+        button {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
         }
-        .modal-content {
-            background: #111;
-            padding: 30px;
-            border-radius: 16px;
-            width: 90%;
-            max-width: 520px;
-            border: 2px solid #0f0;
-        }
-        label { display: block; margin: 12px 0; }
-        .note { font-size: 0.85em; opacity: 0.7; margin-top: 8px; }
+        button:hover { background: #0c0; }
+        pre, .xterm { font-family: ui-monospace, monospace; }
+        .note { font-size: 0.85em; opacity: 0.7; }
     </style>
 </head>
 <body>
-    <div id="settings" onclick="showSettings()">⚙️</div>
-    
-    <h1>clipy.run</h1>
-    <p>Private DSPy + CLI tools in your browser.<br>
-       Registry: <a href="https://github.com/zoltanas/clipy-registry" target="_blank" style="color:#0f0">zoltanas/clipy-registry</a><br>
-       <span class="note">Standard model: <strong>openrouter/free</strong> with built-in reasoning (your exact pattern)</span>
-    </p>
-
-    <div id="tools-list">Loading your tools from registry…</div>
-
-    <input id="cmd" placeholder="analyze sales.csv and plot trends OR paste full DSPy code here" autocomplete="off">
-    <button onclick="run()">▶ Run Privately</button>
-    
-    <pre id="out">Ready. Using openrouter/free with reasoning enabled. Paste your OpenRouter key in ⚙️</pre>
-
-    <!-- Settings Modal -->
-    <div id="modal">
-        <div class="modal-content">
-            <h2>LLM Settings (saved only in your browser)</h2>
-            
-            <label>
-                <input type="radio" name="mode" value="cloud" checked> Cloud — OpenRouter (openrouter/free + reasoning)
-            </label>
-            <label>
-                <input type="radio" name="mode" value="local"> Local demo mode (no API key)
-            </label>
-            
-            <input id="key" type="password" placeholder="sk-or-v1-... (OpenRouter key)">
-            
-            <div style="margin-top:20px">
-                <button onclick="saveSettings()" style="width:48%;margin-right:4%">Save</button>
-                <button onclick="hideSettings()" style="width:48%;background:#222">Close</button>
-            </div>
-            <small style="opacity:0.6;display:block;margin-top:16px">Your key never leaves your browser. Model is always openrouter/free with reasoning.</small>
-        </div>
+    <div class="header">
+        <h1>cli.run</h1>
+        <span class="note">Internet of Private CLI Tools — 100% in your browser</span>
     </div>
+    
+    <p>Registry: <a href="https://github.com/zoltanas/clipy-registry" target="_blank" style="color:#0f0">zoltanas/clipy-registry</a> • Try <code>cli://pandas?csv=data.csv</code> or go to <a href="/tools">/tools</a></p>
+
+    <div id="tools-list">Loading tools from your registry…</div>
+
+    <div id="term-container"></div>
+    <button onclick="copyJson()" style="margin-top:12px;">📋 Copy JSON for Agents</button>
 
     <script type="module">
         const REGISTRY_URL = "https://raw.githubusercontent.com/zoltanas/clipy-registry/main/tools.json";
         
-        let pyodide = null;
+        let term;
         let registry = [];
+        let currentOutput = { stdout: "", stderr: "", exitCode: 0, artifacts: {} };
 
-        async function init() {
-            const out = document.getElementById('out');
-            out.textContent = "Loading Pyodide + DSPy... (first time ~15-25s)";
+        async function initTerminal() {
+            term = new Terminal({
+                theme: { background: '#000', foreground: '#0f0', cursor: '#0f0' },
+                fontSize: 15,
+                fontFamily: 'ui-monospace, monospace',
+                cols: 80,
+                rows: 24
+            });
+            term.open(document.getElementById('term-container'));
+            term.writeln("\x1b[32mcli.run ready — waiting for tool...\x1b[0m");
+        }
 
-            pyodide = await loadPyodide();
-            
-            await pyodide.loadPackage(['micropip']);
-            await pyodide.runPythonAsync(`
-                import micropip
-                await micropip.install('dspy-ai')
-                import dspy
-                print("DSPy loaded ✓")
-            `);
-
-            // Load registry
+        async function loadRegistry() {
             try {
                 const resp = await fetch(REGISTRY_URL);
                 registry = await resp.json();
             } catch(e) {
-                registry = [{name: "demo-tool", description: "Registry not found"}];
+                registry = [
+                    { name: "help", runtime: "text", description: "Registry not found — add tools.json" },
+                    { name: "pandas", runtime: "pyodide", packages: ["pandas"], code: "import pandas as pd\nprint('pandas ready — use ?code=your code')" }
+                ];
             }
-            
             renderTools();
-            out.textContent = "Ready! Using openrouter/free with reasoning enabled. Add your key in ⚙️";
         }
 
         function renderTools() {
             const container = document.getElementById('tools-list');
-            let html = `<strong>Available Private Tools (${registry.length}):</strong><br>`;
+            let html = `<strong>Available Tools (${registry.length}):</strong><br>`;
             registry.forEach(tool => {
-                html += `<span class="tool-chip">${tool.name}</span>`;
+                html += `<span class="tool-chip" onclick="runTool('${tool.name}')">${tool.name}</span>`;
             });
             container.innerHTML = html;
         }
 
-        function getSettings() {
-            return {
-                mode: localStorage.getItem('clipy_mode') || 'cloud',
-                key: localStorage.getItem('clipy_key') || '',
-                model: "openrouter/free"   // FIXED as standard per your request
-            };
+        window.runTool = async (toolName) => {
+            const url = new URL(location.href);
+            url.pathname = '/' + toolName;
+            history.pushState({}, '', url);
+            await run();
+        };
+
+        async function run() {
+            if (!term) await initTerminal();
+            term.clear();
+            term.writeln(`\x1b[32mRunning cli://${location.pathname.slice(1)} ...\x1b[0m`);
+
+            const toolName = location.pathname.slice(1) || 'help';
+            const params = Object.fromEntries(new URLSearchParams(location.search));
+            
+            const manifest = registry.find(t => t.name === toolName) || {name: toolName, runtime: "text"};
+
+            currentOutput = { stdout: "", stderr: "", exitCode: 0, artifacts: {} };
+
+            if (manifest.runtime === 'pyodide') {
+                term.writeln("Booting Pyodide sandbox...");
+                const pyodide = await loadPyodide();
+                await pyodide.loadPackage(manifest.packages || []);
+                
+                const code = manifest.code || params.code || "print('Tool ready')";
+                try {
+                    const result = await pyodide.runPythonAsync(code);
+                    currentOutput.stdout = String(result);
+                    term.writeln(currentOutput.stdout);
+                } catch(e) {
+                    currentOutput.stderr = e.message;
+                    term.writeln("\x1b[31m" + e.message + "\x1b[0m");
+                }
+            } 
+            else if (manifest.runtime === 'webcontainer') {
+                term.writeln("Booting WebContainer (Node.js sandbox)...");
+                const wc = await WebContainer.boot();
+                await wc.mount({ 
+                    'package.json': { 
+                        file: { contents: manifest.packageJson || '{"dependencies":{}}' } 
+                    } 
+                });
+                await wc.run({ command: 'npm', args: ['install', '--silent'] });
+                
+                const cmd = manifest.cmd || params.cmd || 'echo';
+                const args = manifest.args ? manifest.args.map(a => a.replace(/\{\{([^}]+)\}\}/g, (_, key) => params[key] || '')) : [];
+                
+                const process = await wc.run({ command: cmd, args });
+                currentOutput.exitCode = process;
+                term.writeln(`\n✓ ${toolName} finished (exit ${process})`);
+            } 
+            else {
+                term.writeln(`\x1b[33mTool "${toolName}" ready (text mode)\x1b[0m`);
+                currentOutput.stdout = `Tool: ${toolName}\nParams: ${JSON.stringify(params, null, 2)}`;
+            }
+
+            term.writeln("\x1b[32mDone. Copy JSON for agents if needed.\x1b[0m");
         }
 
-        window.showSettings = () => {
-            const modal = document.getElementById('modal');
-            const s = getSettings();
-            document.querySelector(`input[name="mode"][value="${s.mode}"]`).checked = true;
-            document.getElementById('key').value = s.key;
-            modal.style.display = 'flex';
+        window.copyJson = () => {
+            const jsonStr = JSON.stringify(currentOutput, null, 2);
+            navigator.clipboard.writeText(jsonStr);
+            term.writeln("\x1b[32mJSON copied to clipboard!\x1b[0m");
         };
 
-        window.hideSettings = () => document.getElementById('modal').style.display = 'none';
-
-        window.saveSettings = () => {
-            const mode = document.querySelector('input[name="mode"]:checked').value;
-            const key = document.getElementById('key').value.trim();
-            localStorage.setItem('clipy_mode', mode);
-            if (key) localStorage.setItem('clipy_key', key);
-            hideSettings();
-            const out = document.getElementById('out');
-            out.textContent = `Settings saved — using openrouter/free with reasoning`;
-        };
-
-        // Main run (DSPy + your OpenRouter reasoning pattern)
-        window.run = async () => {
-            if (!pyodide) {
-                document.getElementById('out').textContent = "Still loading... try again in a few seconds.";
-                return;
+        // Auto-run if tool in URL
+        async function main() {
+            await initTerminal();
+            await loadRegistry();
+            const tool = location.pathname.slice(1);
+            if (tool && tool !== 'tools') {
+                await run();
+            } else if (location.pathname === '/tools') {
+                term.writeln("Available tools loaded above — click any chip to run");
             }
+        }
 
-            const input = document.getElementById('cmd').value.trim();
-            if (!input) return;
+        main();
 
-            const out = document.getElementById('out');
-            const {mode, key} = getSettings();
-            
-            out.textContent = `Running with openrouter/free + reasoning...`;
-
-            pyodide.globals.set("user_input", input);
-            pyodide.globals.set("registry_json", JSON.stringify(registry));
-            pyodide.globals.set("llm_mode", mode);
-            pyodide.globals.set("llm_key", key);
-
-            try {
-                const result = await pyodide.runPythonAsync(`
-import dspy
-import json
-from js import console
-
-tools_list = json.loads(registry_json)
-
-class CliTool(dspy.Module):
-    def __init__(self, name):
-        self.name = name
-    def forward(self, task):
-        return f"[{self.name} executed privately]\\n{task[:300]}..."
-
-tool_instances = [CliTool(t["name"]) for t in tools_list]
-
-# === YOUR OPENROUTER/FREE + REASONING STANDARD ===
-if llm_mode == "cloud" and llm_key:
-    lm = dspy.OpenAI(
-        model="openrouter/free",
-        api_base="https://openrouter.ai/api/v1",
-        api_key=llm_key,
-        max_tokens=4096,
-        temperature=0.7
-    )
-else:
-    class DemoLM:
-        def __call__(self, prompt): 
-            return "Demo (reasoning enabled): Task completed privately using registry tools."
-        def __getattr__(self, name): return lambda *a,**k: "Demo"
-    lm = DemoLM()
-
-dspy.configure(lm=lm)
-
-agent = dspy.ReAct(
-    "task -> result",
-    tools=tool_instances,
-    max_iters=6
-)
-
-pred = agent(task=user_input)
-print(pred.result)
-                `);
-                
-                out.textContent = result || "✓ Done (openrouter/free reasoning trace in console)";
-            } catch(e) {
-                out.textContent = "Error: " + e.message;
-                console.error(e);
-            }
-        };
-
-        init();
+        // PWA / protocol hint
+        if ('serviceWorker' in navigator) {
+            console.log("%ccli.run PWA ready — visit once to enable cli:// links", "color:#0f0");
+        }
     </script>
 </body>
 </html>
