@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>clipy.run — DSPy + Private CLIs + OpenRouter</title>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.29.3/full/pyodide.js"></script>
+  <style>
+    body {font-family:system-ui; background:#111; color:#0f0; padding:20px; margin:0;}
+    #settings {position:fixed; top:10px; right:10px; background:#222; padding:10px; border-radius:8px; cursor:pointer;}
+    input, button, select {padding:8px; margin:5px; background:#222; color:#0f0; border:1px solid #0f0;}
+    pre {background:#000; padding:15px; border-radius:8px; overflow:auto;}
+  </style>
+</head>
+<body>
+  <div id="settings" onclick="showSettings()">⚙️ LLM Settings</div>
+  <h1>clipy.run</h1>
+  <input id="cmd" placeholder="analyze sales.csv and plot trends OR paste DSPy code here" style="width:100%;padding:12px;font-size:16px;">
+  <button onclick="run()" style="font-size:16px;">Run Privately</button>
+  <pre id="out">Ready — choose LLM in ⚙️</pre>
+
+  <!-- Simple settings modal -->
+  <div id="modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);align-items:center;justify-content:center;">
+    <div style="background:#111;padding:30px;border-radius:12px;width:90%;max-width:500px;">
+      <h2>LLM Settings (saved only in your browser)</h2>
+      <label><input type="radio" name="mode" value="local" checked> Local (WebLLM — free, fully private)</label><br><br>
+      <label><input type="radio" name="mode" value="cloud"> Cloud (OpenRouter — faster)</label><br>
+      <input id="key" type="password" placeholder="OpenRouter API key (sk-or-...)" style="width:100%;">
+      <select id="model">
+        <option value="openai/gpt-4o">GPT-4o</option>
+        <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+        <option value="google/gemini-flash-1.5">Gemini Flash</option>
+        <option value="meta-llama/llama-3.3-70b">Llama 3.3 70B</option>
+      </select>
+      <button onclick="saveSettings()">Save</button>
+      <button onclick="hideSettings()">Close</button>
+    </div>
+  </div>
+
+  <script type="module">
+    let pyodide;
+    async function initPyodide() {
+      pyodide = await loadPyodide();
+      await pyodide.loadPackage(['micropip']);
+      await pyodide.runPythonAsync(`
+        import micropip
+        await micropip.install('dspy-ai')
+        import dspy
+      `);
+      console.log("DSPy ready in browser");
+    }
+    initPyodide();
+
+    function getSettings() {
+      return {
+        mode: localStorage.getItem('clipy_mode') || 'local',
+        key: localStorage.getItem('clipy_key') || '',
+        model: localStorage.getItem('clipy_model') || 'openai/gpt-4o'
+      };
+    }
+
+    window.showSettings = () => document.getElementById('modal').style.display = 'flex';
+    window.hideSettings = () => document.getElementById('modal').style.display = 'none';
+    window.saveSettings = () => {
+      const mode = document.querySelector('input[name="mode"]:checked').value;
+      const key = document.getElementById('key').value;
+      const model = document.getElementById('model').value;
+      localStorage.setItem('clipy_mode', mode);
+      if (key) localStorage.setItem('clipy_key', key);
+      localStorage.setItem('clipy_model', model);
+      hideSettings();
+      document.getElementById('out').textContent = `Settings saved — using ${mode === 'local' ? 'Local WebLLM' : 'OpenRouter ' + model}`;
+    };
+
+    window.run = async () => {
+      const input = document.getElementById('cmd').value.trim();
+      const out = document.getElementById('out');
+      const {mode, key, model} = getSettings();
+
+      out.textContent = `Running... (LLM: ${mode === 'local' ? 'Local' : model})`;
+
+      // Pass settings to Python
+      pyodide.globals.set("llm_mode", mode);
+      pyodide.globals.set("llm_key", key);
+      pyodide.globals.set("llm_model", model);
+      pyodide.globals.set("user_input", input);
+
+      const result = await pyodide.runPythonAsync(`
+        import dspy
+        from js import console
+
+        # Choose LM
+        if llm_mode == "local":
+            lm = dspy.LM("webllm:phi-3")  # fallback local
+        else:
+            lm = dspy.OpenAI(
+                model=llm_model,
+                api_base="https://openrouter.ai/api/v1",
+                api_key=llm_key,
+                max_tokens=4096
+            )
+        dspy.configure(lm=lm)
+
+        # Tiny registry of CLI tools (add more as needed)
+        class CliTool(dspy.Module):
+            def forward(self, task):
+                # In real version this would call WebContainer/Pyodide CLI
+                return f"[CLI executed privately: {task}]"
+
+        pandas = CliTool()
+        agent = dspy.ReAct("task -> result", tools=[pandas])
+
+        pred = agent(task=user_input)
+        print(pred.result)
+      `);
+
+      out.textContent = result || "Done (see console for full trace)";
+    };
+  </script>
+</body>
+</html>
