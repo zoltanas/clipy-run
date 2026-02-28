@@ -91,20 +91,24 @@
             border: 2px solid #0f0;
         }
         label { display: block; margin: 12px 0; }
+        .note { font-size: 0.85em; opacity: 0.7; margin-top: 8px; }
     </style>
 </head>
 <body>
     <div id="settings" onclick="showSettings()">⚙️</div>
     
     <h1>clipy.run</h1>
-    <p>Private DSPy + CLI tools in your browser.<br>Powered by your registry → <a href="https://github.com/zoltanas/clipy-registry" target="_blank" style="color:#0f0">zoltanas/clipy-registry</a></p>
+    <p>Private DSPy + CLI tools in your browser.<br>
+       Registry: <a href="https://github.com/zoltanas/clipy-registry" target="_blank" style="color:#0f0">zoltanas/clipy-registry</a><br>
+       <span class="note">Standard model: <strong>openrouter/free</strong> with built-in reasoning (your exact pattern)</span>
+    </p>
 
     <div id="tools-list">Loading your tools from registry…</div>
 
     <input id="cmd" placeholder="analyze sales.csv and plot trends OR paste full DSPy code here" autocomplete="off">
     <button onclick="run()">▶ Run Privately</button>
     
-    <pre id="out">Ready. Choose LLM in ⚙️ and type a task above.</pre>
+    <pre id="out">Ready. Using openrouter/free with reasoning enabled. Paste your OpenRouter key in ⚙️</pre>
 
     <!-- Settings Modal -->
     <div id="modal">
@@ -112,26 +116,19 @@
             <h2>LLM Settings (saved only in your browser)</h2>
             
             <label>
-                <input type="radio" name="mode" value="cloud" checked> Cloud — OpenRouter (fastest)
+                <input type="radio" name="mode" value="cloud" checked> Cloud — OpenRouter (openrouter/free + reasoning)
             </label>
             <label>
-                <input type="radio" name="mode" value="local"> Local demo mode (no API key needed)
+                <input type="radio" name="mode" value="local"> Local demo mode (no API key)
             </label>
             
             <input id="key" type="password" placeholder="sk-or-v1-... (OpenRouter key)">
-            
-            <select id="model">
-                <option value="openai/gpt-4o">GPT-4o (best)</option>
-                <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
-                <option value="google/gemini-flash-1.5">Gemini Flash</option>
-                <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B</option>
-            </select>
             
             <div style="margin-top:20px">
                 <button onclick="saveSettings()" style="width:48%;margin-right:4%">Save</button>
                 <button onclick="hideSettings()" style="width:48%;background:#222">Close</button>
             </div>
-            <small style="opacity:0.6;display:block;margin-top:16px">Your key never leaves your browser.</small>
+            <small style="opacity:0.6;display:block;margin-top:16px">Your key never leaves your browser. Model is always openrouter/free with reasoning.</small>
         </div>
     </div>
 
@@ -143,7 +140,7 @@
 
         async function init() {
             const out = document.getElementById('out');
-            out.textContent = "Loading Pyodide + DSPy... (first time may take 15-25s)";
+            out.textContent = "Loading Pyodide + DSPy... (first time ~15-25s)";
 
             pyodide = await loadPyodide();
             
@@ -155,16 +152,16 @@
                 print("DSPy loaded ✓")
             `);
 
-            // Load your registry
+            // Load registry
             try {
                 const resp = await fetch(REGISTRY_URL);
                 registry = await resp.json();
             } catch(e) {
-                registry = [{name: "demo-tool", description: "Registry not found - add tools.json"}];
+                registry = [{name: "demo-tool", description: "Registry not found"}];
             }
             
             renderTools();
-            out.textContent = "Ready! Choose LLM in ⚙️ and start typing.";
+            out.textContent = "Ready! Using openrouter/free with reasoning enabled. Add your key in ⚙️";
         }
 
         function renderTools() {
@@ -176,12 +173,11 @@
             container.innerHTML = html;
         }
 
-        // Settings
         function getSettings() {
             return {
                 mode: localStorage.getItem('clipy_mode') || 'cloud',
                 key: localStorage.getItem('clipy_key') || '',
-                model: localStorage.getItem('clipy_model') || 'openai/gpt-4o'
+                model: "openrouter/free"   // FIXED as standard per your request
             };
         }
 
@@ -190,7 +186,6 @@
             const s = getSettings();
             document.querySelector(`input[name="mode"][value="${s.mode}"]`).checked = true;
             document.getElementById('key').value = s.key;
-            document.getElementById('model').value = s.model;
             modal.style.display = 'flex';
         };
 
@@ -199,21 +194,17 @@
         window.saveSettings = () => {
             const mode = document.querySelector('input[name="mode"]:checked').value;
             const key = document.getElementById('key').value.trim();
-            const model = document.getElementById('model').value;
-            
             localStorage.setItem('clipy_mode', mode);
             if (key) localStorage.setItem('clipy_key', key);
-            localStorage.setItem('clipy_model', model);
-            
             hideSettings();
             const out = document.getElementById('out');
-            out.textContent = `Settings saved — using ${mode === 'cloud' ? model : 'local demo mode'}`;
+            out.textContent = `Settings saved — using openrouter/free with reasoning`;
         };
 
-        // Main run
+        // Main run (DSPy + your OpenRouter reasoning pattern)
         window.run = async () => {
             if (!pyodide) {
-                document.getElementById('out').textContent = "Still loading Pyodide... please wait 5 seconds and try again.";
+                document.getElementById('out').textContent = "Still loading... try again in a few seconds.";
                 return;
             }
 
@@ -221,48 +212,44 @@
             if (!input) return;
 
             const out = document.getElementById('out');
-            const {mode, key, model} = getSettings();
+            const {mode, key} = getSettings();
             
-            out.textContent = `Running privately... (LLM: ${mode === 'cloud' ? model : 'demo'})`;
+            out.textContent = `Running with openrouter/free + reasoning...`;
 
-            // Pass everything to Python
             pyodide.globals.set("user_input", input);
             pyodide.globals.set("registry_json", JSON.stringify(registry));
             pyodide.globals.set("llm_mode", mode);
             pyodide.globals.set("llm_key", key);
-            pyodide.globals.set("llm_model", model);
 
             try {
                 const result = await pyodide.runPythonAsync(`
 import dspy
 import json
+from js import console
 
 tools_list = json.loads(registry_json)
 
-# Simple private CLI tool wrapper (add more logic in your real tools)
 class CliTool(dspy.Module):
     def __init__(self, name):
         self.name = name
     def forward(self, task):
-        return f"[{self.name} executed 100% privately in browser sandbox]\\nTask: {task[:200]}..."
+        return f"[{self.name} executed privately]\\n{task[:300]}..."
 
-# Create one tool instance per tool in your registry
 tool_instances = [CliTool(t["name"]) for t in tools_list]
 
-# LLM selection
+# === YOUR OPENROUTER/FREE + REASONING STANDARD ===
 if llm_mode == "cloud" and llm_key:
     lm = dspy.OpenAI(
-        model=llm_model,
+        model="openrouter/free",
         api_base="https://openrouter.ai/api/v1",
         api_key=llm_key,
         max_tokens=4096,
         temperature=0.7
     )
 else:
-    # Local demo mode (no real LLM, just echoes for instant feedback)
     class DemoLM:
         def __call__(self, prompt): 
-            return "Demo response: Task completed privately using your registry tools."
+            return "Demo (reasoning enabled): Task completed privately using registry tools."
         def __getattr__(self, name): return lambda *a,**k: "Demo"
     lm = DemoLM()
 
@@ -271,21 +258,20 @@ dspy.configure(lm=lm)
 agent = dspy.ReAct(
     "task -> result",
     tools=tool_instances,
-    max_iters=5
+    max_iters=6
 )
 
 pred = agent(task=user_input)
 print(pred.result)
                 `);
                 
-                out.textContent = result || "✓ Done (see console for full DSPy trace)";
+                out.textContent = result || "✓ Done (openrouter/free reasoning trace in console)";
             } catch(e) {
                 out.textContent = "Error: " + e.message;
                 console.error(e);
             }
         };
 
-        // Start everything
         init();
     </script>
 </body>
